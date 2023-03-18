@@ -112,3 +112,12 @@ protected:
 	// Called when the game starts or when spawned
 	virtual void BeginPlay() override;
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
+
+	//Called when player land
+	virtual void Landed(const FHitResult& Hit) override;
+	
+
+
+	
+
+};

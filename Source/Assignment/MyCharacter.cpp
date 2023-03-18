@@ -219,4 +219,48 @@ void AMyCharacter::Move(const FInputActionValue& Value)
 			// get right vector 
 			const FVector RightDirection = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y);
 
+			// add movement 
+			AddMovementInput(ForwardDirection, MovementVector.Y);
+			AddMovementInput(RightDirection, MovementVector.X);
+		}
+		
+	}
+}
+
+void AMyCharacter::StopMoving()
+{
+	PlayerMovementVector = FVector2D::ZeroVector;
+	Wpressed = Spressed = Apressed = Dpressed = false;
+	if (MyCharMovem)
+	{
+		MyCharMovem->MovingLeft = false;
+		MyCharMovem->MovingRight = false;
+	}
+}
+
+void AMyCharacter::Look(const FInputActionValue& Value)
+{
+	// input is a Vector2D
+	FVector2D LookAxisVector = Value.Get<FVector2D>();
+
+	if (Controller != nullptr )
+	{
+		// add yaw and pitch input to controller
+		AddControllerYawInput(LookAxisVector.X);
+		AddControllerPitchInput(LookAxisVector.Y);
+	}
+}
+//IGNORING SPAWNED CHILDREN ACTORS
+FCollisionQueryParams AMyCharacter::GetIgnoreCharacterParams() const
+{
+
+	FCollisionQueryParams Params;
+	TArray<AActor*> CharacterChildren;
+	GetAllChildActors(CharacterChildren);
+	Params.AddIgnoredActors(CharacterChildren);
+	Params.AddIgnoredActor(this);
 	
+	return Params;
+
+}
+

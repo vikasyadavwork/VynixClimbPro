@@ -8,4 +8,6 @@
 
 void UMyUserWidget::NativeConstruct()
 {
-	Super::NativeC
+	Super::NativeConstruct();
+}
+

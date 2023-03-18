@@ -6,6 +6,8 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "Animation/AnimInstance.h"
 #include "DrawDebugHelpers.h"
+#include "Engine/World.h"
+#include "TimerManager.h"
 #include "Kismet/KismetSystemLibrary.h"
 #include "MyAnimationInterface.h"
 #include "Kismet/GameplayStatics.h"
@@ -48,6 +50,7 @@ void UMyCharacterMovementComponent::UpdateCharacterStateBeforeMovement(float Del
 		TurnLeftTracer();
 		TurnRightTracer();
 		JumpUpTracer();
+		JumpDownTracer();
 		
 		
 	}
@@ -433,6 +436,13 @@ void UMyCharacterMovementComponent::GrabLedge(FVector WallNormal, FVector WallLo
 	{
 		return;
 	}
+	UAnimInstance* Animation = MyPlayer->GetMesh() ? MyPlayer->GetMesh()->GetAnimInstance() : nullptr;
+	if (!Animation || !Animation->GetClass()->ImplementsInterface(UMyAnimationInterface::StaticClass()))
+	{
+		return;
+	}
+	GetWorld()->GetTimerManager().ClearTimer(JumpRecoveryTimer);
+	MyPlayer->IsJumping = false;
 
 	if (IsHangingPoint) {
 		OnHangingLedge = true;
@@ -552,6 +562,8 @@ void UMyCharacterMovementComponent::MoveInLedge()
 	{
 		return;
 	}
+	MovingLeft = false;
+	MovingRight = false;
 
 	
 	if (CanMoveRight) {
@@ -632,82 +644,53 @@ void UMyCharacterMovementComponent::RightJumpTracer()
 
 void UMyCharacterMovementComponent::JumpLeftLedge()
 {
-	if (!IsValid(MyPlayer) || !UpdatedComponent || !GetWorld())
+	if (!IsValid(MyPlayer) || !UpdatedComponent || !GetWorld() || MyPlayer->IsJumping || !MyPlayer->Apressed || !CanJumpLeft)
 	{
 		return;
 	}
-
-	if (MyPlayer->Apressed) {
-		if (MyPlayer->IsJumping) {
-
-		}
-		else {
-			SetMovementMode(MOVE_Flying);
-			if (MyPlayer->GetMesh() && MyPlayer->GetMesh()->GetAnimInstance() && MyPlayer->GetMesh()->GetAnimInstance()->GetClass()->ImplementsInterface(UMyAnimationInterface::StaticClass()))
-			{
-				IMyAnimationInterface::Execute_JumpLeft(MyPlayer->GetMesh()->GetAnimInstance(), true);
-				MyPlayer->IsJumping = true;
-				GetWorld()->GetTimerManager().SetTimer(JumpRecoveryTimer,this,&UMyCharacterMovementComponent::StartTracingAgain, 1, false, 1.f);
-				IsHanging = false;
-				MovingLeft = false;
-				MovingRight = false;
-				CanMoveLeft = false;
-				CanMoveRight = false;
-				
-				
-
-			}
-
-
-		}
+	UAnimInstance* Animation = MyPlayer->GetMesh() ? MyPlayer->GetMesh()->GetAnimInstance() : nullptr;
+	if (Animation && Animation->GetClass()->ImplementsInterface(UMyAnimationInterface::StaticClass()))
+	{
+		SetMovementMode(MOVE_Flying);
+		MyPlayer->IsJumping = true;
+		IsHanging = IsHangingPoint = false;
+		MovingLeft = MovingRight = CanMoveLeft = CanMoveRight = false;
+		IMyAnimationInterface::Execute_JumpLeft(Animation, true);
+		GetWorld()->GetTimerManager().SetTimer(JumpRecoveryTimer, this, &UMyCharacterMovementComponent::StartTracingAgain, 1.f, false);
 	}
 }
 
 void UMyCharacterMovementComponent::JumpRightLedge()
 {
-	if (!IsValid(MyPlayer) || !UpdatedComponent || !GetWorld())
+	if (!IsValid(MyPlayer) || !UpdatedComponent || !GetWorld() || MyPlayer->IsJumping || !MyPlayer->Dpressed || !CanJumpRight)
 	{
 		return;
 	}
-
-	if (MyPlayer->Dpressed) {
-		if (MyPlayer->IsJumping) {
-
-		}
-		else {
-			SetMovementMode(MOVE_Flying);
-			if (MyPlayer->GetMesh() && MyPlayer->GetMesh()->GetAnimInstance() && MyPlayer->GetMesh()->GetAnimInstance()->GetClass()->ImplementsInterface(UMyAnimationInterface::StaticClass()))
-			{
-				IMyAnimationInterface::Execute_JumpRight(MyPlayer->GetMesh()->GetAnimInstance(), true);
-				MyPlayer->IsJumping = true;
-				GetWorld()->GetTimerManager().SetTimer(JumpRecoveryTimer, this, &UMyCharacterMovementComponent::StartTracingAgain, 1, false, 1.f);
-				IsHanging = false;
-				MovingLeft = false;
-				MovingRight = false;
-				CanMoveLeft = false;
-				CanMoveRight = false;
-				
-				
-				
-			}
-
-
-		}
+	UAnimInstance* Animation = MyPlayer->GetMesh() ? MyPlayer->GetMesh()->GetAnimInstance() : nullptr;
+	if (Animation && Animation->GetClass()->ImplementsInterface(UMyAnimationInterface::StaticClass()))
+	{
+		SetMovementMode(MOVE_Flying);
+		MyPlayer->IsJumping = true;
+		IsHanging = IsHangingPoint = false;
+		MovingLeft = MovingRight = CanMoveLeft = CanMoveRight = false;
+		IMyAnimationInterface::Execute_JumpRight(Animation, true);
+		GetWorld()->GetTimerManager().SetTimer(JumpRecoveryTimer, this, &UMyCharacterMovementComponent::StartTracingAgain, 1.f, false);
 	}
 }
 
 void UMyCharacterMovementComponent::StartTracingAgain()
 {
-	/*
-	//SetMovementMode(MOVE_Falling);
-	if (MyPlayer->GetMesh() && MyPlayer->GetMesh()->GetAnimInstance() && MyPlayer->GetMesh()->GetAnimInstance()->GetClass()->ImplementsInterface(UMyAnimationInterface::StaticClass()))
+	if (!IsValid(MyPlayer))
 	{
-		IMyAnimationInterface::Execute_CanGrab(MyPlayer->GetMesh()->GetAnimInstance(), false);
-
+		return;
 	}
-	
-	*/
-	
+	CanTrace = true;
+	RecentlyJumped = false;
+	MyPlayer->IsJumping = false;
+	if (MovementMode == MOVE_Flying && !IsHanging && !IsHangingPoint && !IsClimbingLedge)
+	{
+		SetMovementMode(MOVE_Falling);
+	}
 }
 
 void UMyCharacterMovementComponent::TurnLeftTracer()
@@ -803,56 +786,37 @@ void UMyCharacterMovementComponent::JumpDownTracer()
 
 void UMyCharacterMovementComponent::JumpUpLedge()
 {
-	if (!IsValid(MyPlayer) || !UpdatedComponent || !GetWorld())
+	if (!IsValid(MyPlayer) || !UpdatedComponent || !GetWorld() || MyPlayer->IsJumping || !MyPlayer->Wpressed || !CanJumpUp)
 	{
 		return;
 	}
-
-	if ( MyPlayer->Wpressed) {
-		if (CanJumpUp) {
-			if (!MyPlayer->IsJumping) {
-				SetMovementMode(MOVE_Flying);
-				if (MyPlayer->GetMesh() && MyPlayer->GetMesh()->GetAnimInstance() && MyPlayer->GetMesh()->GetAnimInstance()->GetClass()->ImplementsInterface(UMyAnimationInterface::StaticClass()))
-				{
-					IMyAnimationInterface::Execute_JumpUp(MyPlayer->GetMesh()->GetAnimInstance(), true);
-					MyPlayer->IsJumping = true;
-					IsHanging = false;
-					MovingLeft = false;
-					MovingRight = false;
-					CanMoveLeft = false;
-					CanMoveRight = false;
-
-
-				}
-			}
-			else {
-
-			}
-		}
+	UAnimInstance* Animation = MyPlayer->GetMesh() ? MyPlayer->GetMesh()->GetAnimInstance() : nullptr;
+	if (Animation && Animation->GetClass()->ImplementsInterface(UMyAnimationInterface::StaticClass()))
+	{
+		SetMovementMode(MOVE_Flying);
+		MyPlayer->IsJumping = true;
+		IsHanging = IsHangingPoint = false;
+		MovingLeft = MovingRight = CanMoveLeft = CanMoveRight = false;
+		IMyAnimationInterface::Execute_JumpUp(Animation, true);
+		GetWorld()->GetTimerManager().SetTimer(JumpRecoveryTimer, this, &UMyCharacterMovementComponent::StartTracingAgain, 1.f, false);
 	}
 }
 
 void UMyCharacterMovementComponent::JumpDownLedge()
 {
-	if (!IsValid(MyPlayer) || !UpdatedComponent || !GetWorld())
+	if (!IsValid(MyPlayer) || !UpdatedComponent || !GetWorld() || MyPlayer->IsJumping || !MyPlayer->Spressed || !CanJumpDown)
 	{
 		return;
 	}
-
-	if (MyPlayer->Spressed) {
-		if (CanJumpDown) {
-			if (MyPlayer->IsJumping) {
-				SetMovementMode(MOVE_Flying);
-				if (MyPlayer->GetMesh() && MyPlayer->GetMesh()->GetAnimInstance() && MyPlayer->GetMesh()->GetAnimInstance()->GetClass()->ImplementsInterface(UMyAnimationInterface::StaticClass()))
-				{
-					IMyAnimationInterface::Execute_JumpDown(MyPlayer->GetMesh()->GetAnimInstance(), true);
-					MyPlayer->IsJumping = true;
-					MyPlayer->DisableInput(UGameplayStatics::GetPlayerController(GetWorld(), 0));
-
-
-				}
-			}
-		}
+	UAnimInstance* Animation = MyPlayer->GetMesh() ? MyPlayer->GetMesh()->GetAnimInstance() : nullptr;
+	if (Animation && Animation->GetClass()->ImplementsInterface(UMyAnimationInterface::StaticClass()))
+	{
+		SetMovementMode(MOVE_Flying);
+		MyPlayer->IsJumping = true;
+		IsHanging = IsHangingPoint = false;
+		MovingLeft = MovingRight = CanMoveLeft = CanMoveRight = false;
+		IMyAnimationInterface::Execute_JumpDown(Animation, true);
+		GetWorld()->GetTimerManager().SetTimer(JumpRecoveryTimer, this, &UMyCharacterMovementComponent::StartTracingAgain, 1.f, false);
 	}
 }
 
@@ -863,13 +827,17 @@ void UMyCharacterMovementComponent::ExitLedge()
 		return;
 	}
 
-	SetMovementMode(MOVE_Walking);
+	GetWorld()->GetTimerManager().ClearTimer(JumpRecoveryTimer);
+	SetMovementMode(MOVE_Falling);
 	if (MyPlayer->GetMesh() && MyPlayer->GetMesh()->GetAnimInstance() && MyPlayer->GetMesh()->GetAnimInstance()->GetClass()->ImplementsInterface(UMyAnimationInterface::StaticClass()))
 	{
 		IMyAnimationInterface::Execute_CanGrab(MyPlayer->GetMesh()->GetAnimInstance(), false);
 
 	}
-	IsHanging = false;
+	IsHanging = IsHangingPoint = IsClimbingLedge = false;
+	MovingLeft = MovingRight = false;
+	MyPlayer->IsJumping = false;
+	CanTrace = true;
 }
 
 
@@ -985,5 +953,95 @@ void UMyCharacterMovementComponent::ClimbLedgeCustomEvent()
 	}
 
 	if (!IsClimbingLedge) {
-		SetMovementMode(MOVE_Flying);
-		if (MyPlayer->GetMesh()
+		if (MyPlayer->GetMesh() && MyPlayer->GetMesh()->GetAnimInstance() && MyPlayer->GetMesh()->GetAnimInstance()->GetClass()->ImplementsInterface(UMyAnimationInterface::StaticClass()))
+		{
+			SetMovementMode(MOVE_Flying);
+			IsClimbingLedge = true;
+			IsHanging = false;
+			IMyAnimationInterface::Execute_ClimbLedge(MyPlayer->GetMesh()->GetAnimInstance(), true);
+		}
+	}
+}
+
+void UMyCharacterMovementComponent::MoveCustomEvent()
+{
+	if (!IsValid(MyPlayer) || !UpdatedComponent || !GetWorld())
+	{
+		return;
+	}
+
+	if (IsHanging) {
+		if (MyPlayer->GetMesh() && MyPlayer->GetMesh()->GetAnimInstance() && MyPlayer->GetMesh()->GetAnimInstance()->GetClass()->ImplementsInterface(UMyAnimationInterface::StaticClass()))
+		{
+			IMyAnimationInterface::Execute_MoveLeftAndRight(MyPlayer->GetMesh()->GetAnimInstance(), 0.f);
+		}
+		MoveInLedge();
+	}
+	else {
+		MovingLeft = false;
+		MovingRight = false;
+	}
+}
+
+//FUNCTION TO GET CAPSULE RADIUS
+float UMyCharacterMovementComponent::ChaCapsuleRadius() const
+{
+	
+	return CharacterOwner->GetCapsuleComponent()->GetScaledCapsuleRadius();
+}
+
+//FUNCTION TO CHECK CAN JUMP OR NOT
+bool UMyCharacterMovementComponent::CanAttemptJump() const
+{
+	return Super::CanAttemptJump() || IsClimbing();
+}
+
+//FUNCTION TO GET CAPSULE HALF HEIGHT
+float UMyCharacterMovementComponent::ChaCapsuleHeight() const
+{
+	return CharacterOwner->GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
+}
+
+//SETTING MAX SPEED BASED ON MOVEMENTMODE
+float UMyCharacterMovementComponent::GetMaxSpeed() const
+{
+	if (MovementMode != MOVE_Custom) {
+		return Super::GetMaxSpeed();
+	}
+	switch (CustomMovementMode) {
+	
+	case Custom_Move_Climb:
+		return MaxClimbSpeed;
+	default:
+		return Super::GetMaxSpeed();
+	}
+
+	
+}
+
+//SETTING BRAKING DEACCELERATION BASED ON MOVEMENETMODE
+float UMyCharacterMovementComponent::GetMaxBrakingDeceleration() const
+{
+	if (MovementMode != MOVE_Custom) return Super::GetMaxBrakingDeceleration();
+	switch (CustomMovementMode) {
+	
+	case Custom_Move_Climb:
+		return BrakingDeaccelerationClimbing;
+	default:
+		return Super::GetMaxBrakingDeceleration();
+
+
+	}
+}
+
+//SETTING CUSTOM PHYS BASED ON MOVEMENT MODE
+void UMyCharacterMovementComponent::PhysCustom(float deltaTime, int32 iterations)
+{
+	Super::PhysCustom(deltaTime, iterations);
+	switch (CustomMovementMode) {
+	
+	case Custom_Move_Climb:
+		return PhysClimb(deltaTime, iterations);
+	}
+	
+}

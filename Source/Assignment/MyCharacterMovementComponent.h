@@ -169,7 +169,7 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite)   bool IsHangingPoint;
 
 
-	class IMyAnimationInterface* AnimObjRef;
+	class IMyAnimationInterface* AnimObjRef = nullptr;
 
 	UFUNCTION(BlueprintCallable)
 	        void ClimbLedgeCustomEvent();
@@ -205,19 +205,19 @@ private:
 	float ChaCapsuleRadius() const;
 
 	//RETURN CANJUMP IN CURRENT MOVEMENT MODE
-	bool CanAttemptJump() const;
+	virtual bool CanAttemptJump() const override;
 
 	//RETURN CAPSULE HEIGHT
 	float ChaCapsuleHeight() const;
 
 	//RETURN MAX SPEED IN CURRENT MOVEMENT MODE
-	float GetMaxSpeed() const;
+	virtual float GetMaxSpeed() const override;
 
 	//RETURN BRAKINGDEACCELERATION
-	float GetMaxBrakingDeacceleration() const;
+	virtual float GetMaxBrakingDeceleration() const override;
 	
 	//SETTING CUSTOM PHYS FUNCTION
-	void PhysCustom(float deltaTime, int32 iterations);
+	virtual void PhysCustom(float deltaTime, int32 iterations) override;
 
 	//TRY CLIMB LEDGE
 	bool TryClimbLedge();
@@ -228,4 +228,7 @@ private:
 	
 	
 	//CUSTOM PHYSCLIMB FOR CLIMBING
-	void PhysCl
+	void PhysClimb(float deltaTime, int32 Iterations);
+	FVector GetClimbLedgeStartLocation(FHitResult FrontHit, FHitResult SurfaceHit) const;
+	
+};
