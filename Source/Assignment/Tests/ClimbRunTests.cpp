@@ -7,6 +7,10 @@
 #include "../EndlessClimbWorld.h"
 #include "Components/InstancedStaticMeshComponent.h"
 #include "Components/SphereComponent.h"
+#include "Components/CapsuleComponent.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Animation/AnimSingleNodeInstance.h"
+#include "Animation/AnimSequence.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
@@ -26,7 +30,7 @@ namespace ClimbTests
 		AEndlessClimber* Climber = nullptr;
 		AEndlessClimbWorld* Arena = nullptr;
 
-		bool Create(bool bWithArena)
+		bool Create(bool bWithArena, UClass* CharacterClass = nullptr, FVector LedgeSize = FVector(105, 175, 26))
 		{
 			if (!GEngine)
 			{
@@ -47,7 +51,7 @@ namespace ClimbTests
 			World->InitializeActorsForPlay(FURL());
 			FActorSpawnParameters Spawn;
 			Spawn.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-			Climber = World->SpawnActor<AEndlessClimber>(AEndlessClimber::StaticClass(), FVector::ZeroVector,
+			Climber = World->SpawnActor<AEndlessClimber>(CharacterClass ? CharacterClass : AEndlessClimber::StaticClass(), FVector::ZeroVector,
 				FRotator::ZeroRotator, Spawn);
 			if (!Climber)
 			{
@@ -62,6 +66,7 @@ namespace ClimbTests
 				{
 					return false;
 				}
+				Arena->LedgeDimensions = LedgeSize;
 				Arena->DispatchBeginPlay();
 			}
 			return true;
@@ -367,7 +372,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FClimbBufferedDodgeTest, "VynixClimb.Runtime.Bu
 bool FClimbBufferedDodgeTest::RunTest(const FString& Parameters)
 {
 	ClimbTests::FPreviewRun Run;
-	if (!TestTrue(TEXT("Preview climber initializes"), Run.Create(false)))
+	if (!TestTrue(TEXT("Preview climber initializes"), Run.Create(true)))
 	{
 		return false;
 	}
@@ -407,6 +412,120 @@ bool FClimbBufferedDodgeTest::RunTest(const FString& Parameters)
 	Run.Climber->Tick(0.12f);
 	TestEqual(TEXT("The final dodge lands on the left edge"), Run.Climber->GetCurrentLane(), 0);
 	TestFalse(TEXT("The cooldown buffer is also consumed exactly once"), Run.Climber->IsLeaping());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FClimbGripBoundsTest, "VynixClimb.Rules.LedgeBounds", ClimbTests::Flags)
+
+bool FClimbGripBoundsTest::RunTest(const FString& Parameters)
+{
+	// An off-centre pivot with nonuniform scaling must not be treated as a centred 100 cm cube.
+	const FBox LocalBounds(FVector(-20, -40, 0), FVector(80, 60, 30));
+	const FTransform Transform(FRotator::ZeroRotator, FVector(500, -300, 21000), FVector(2, 3, 0.5));
+	const FBox Bounds = LocalBounds.TransformBy(Transform);
+	FVector Grip;
+	TestTrue(TEXT("A scaled ledge accepts a capsule"), ClimbRunRules::TryHangLocation(Bounds, -10000, 42, 8, 70, Grip));
+	TestTrue(TEXT("Depth includes the pivot and scale"), FMath::IsNearlyEqual(Grip.X, 410.0));
+	TestTrue(TEXT("Width clamps the grip away from the left corner"), FMath::IsNearlyEqual(Grip.Y, -370.0));
+	TestTrue(TEXT("Hands meet the actual top, including thickness"), FMath::IsNearlyEqual(Grip.Z + 70, 21015.0));
+	TestTrue(TEXT("The entire capsule clears the front"), Grip.X + 42 <= Bounds.Min.X - 8);
+	TestTrue(TEXT("The opposite corner is also clamped"), ClimbRunRules::TryHangLocation(Bounds, 10000, 42, 8, 70, Grip)
+		&& FMath::IsNearlyEqual(Grip.Y, Bounds.Max.Y - 50));
+	TestFalse(TEXT("A narrow ledge is rejected"), ClimbRunRules::TryHangLocation(FBox(FVector(0, 0, 0), FVector(100, 99, 20)), 50, 42, 8, 70, Grip));
+	TestFalse(TEXT("Invalid bounds are rejected"), ClimbRunRules::TryHangLocation(FBox(ForceInit), 0, 42, 8, 70, Grip));
+	TestFalse(TEXT("Invalid capsule dimensions are rejected"), ClimbRunRules::TryHangLocation(Bounds, 0, -1, 8, 70, Grip));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FClimbPaytonTest, "VynixClimb.Runtime.PaytonAndLedgeClearance", ClimbTests::Flags)
+
+bool FClimbPaytonTest::RunTest(const FString& Parameters)
+{
+	UClass* PaytonClass = LoadClass<AEndlessClimber>(nullptr, TEXT("/Game/Endless/Payton/BP_EndlessPayton.BP_EndlessPayton_C"));
+	if (!TestNotNull(TEXT("The playable Payton Blueprint loads"), PaytonClass)) return false;
+	for (const FVector Size : { FVector(105, 175, 26), FVector(210, 250, 45), FVector(60, 130, 18) })
+	{
+		ClimbTests::FPreviewRun Run;
+		if (!TestTrue(TEXT("Payton starts in the resized arena"), Run.Create(true, PaytonClass, Size))) return false;
+		USkeletalMeshComponent* Body = Run.Climber->GetMesh();
+		TestTrue(TEXT("The original Payton body is used"), Body->GetSkeletalMeshAsset()->GetPathName().Contains(TEXT("/MetaHumans/Payton/")));
+		UAnimSingleNodeInstance* Animation = Body->GetSingleNodeInstance();
+		if (!TestNotNull(TEXT("Payton has a running climbing animation"), Animation)) return false;
+		TestTrue(TEXT("Clips are retargeted to Payton's actual skeleton"), Animation->GetCurrentAsset()->GetSkeleton() == Body->GetSkeletalMeshAsset()->GetSkeleton());
+		int32 FollowingClothes = 0;
+		TInlineComponentArray<USkeletalMeshComponent*> Parts(Run.Climber);
+		for (USkeletalMeshComponent* Part : Parts)
+		{
+			if (Part != Body && Part->LeaderPoseComponent.Get() == Body) ++FollowingClothes;
+		}
+		TestTrue(TEXT("Clothing follows the animated body"), FollowingClothes >= 3);
+		const float Radius = Run.Climber->GetCapsuleComponent()->GetScaledCapsuleRadius();
+		for (int32 Step = 0; Step < 85; ++Step)
+		{
+			FBox Bounds;
+			if (!TestTrue(TEXT("The current recycled ledge can be found"), Run.Arena->GetLedgeBounds(Step, Run.Climber->GetCurrentLane(), Bounds))) return false;
+			TestTrue(TEXT("Generated ledges use the requested physical size"), Bounds.GetSize().Equals(Size, 0.02));
+			TestTrue(TEXT("The capsule is outside the ledge front"), Run.Climber->GetActorLocation().X + Radius <= Bounds.Min.X - 7.9);
+			TestTrue(TEXT("The hanging hand height meets the ledge top"), FMath::IsNearlyEqual(Run.Climber->GetActorLocation().Z + Run.Climber->GetHangHandHeight(), Bounds.Max.Z, 0.02));
+			Run.Climber->Tick(0.12f);
+			Run.Climber->LeapToLane(1 - Run.Climber->GetCurrentLane());
+			TestTrue(TEXT("A valid ledge starts a jump"), Run.Climber->IsLeaping());
+			for (int32 Frame = 0; Frame < 12; ++Frame)
+			{
+				Run.Climber->Tick(ClimbRunRules::JumpDuration / 12.f + 0.0001f);
+				TestTrue(TEXT("The complete jump stays outside the ledges"), Run.Climber->GetActorLocation().X + Radius <= Bounds.Min.X - 7.9);
+			}
+			TestFalse(TEXT("Payton lands after each jump"), Run.Climber->IsLeaping());
+			Run.Arena->Tick(0.f);
+		}
+		// Rock spawns must follow the new depth, including much deeper ledges.
+		Run.Arena->Tick(4.51f);
+		Run.Arena->Tick(Run.Arena->GetWarningDuration() + 0.01f);
+		if (TestEqual(TEXT("The new geometry still releases a warned rock"), Run.Rocks().Num(), 1))
+			TestTrue(TEXT("Rock depth matches the actual player grip"), FMath::IsNearlyEqual(Run.Rocks()[0]->GetActorLocation().X, Run.Climber->GetActorLocation().X, 0.01));
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FClimbHandContactTest, "VynixClimb.Runtime.HandContactDuringIdle", ClimbTests::Flags)
+
+bool FClimbHandContactTest::RunTest(const FString& Parameters)
+{
+	UClass* PaytonClass = LoadClass<AEndlessClimber>(nullptr, TEXT("/Game/Endless/Payton/BP_EndlessPayton.BP_EndlessPayton_C"));
+	ClimbTests::FPreviewRun Run;
+	if (!TestNotNull(TEXT("Payton loads"), PaytonClass) || !Run.Create(true, PaytonClass)) return false;
+	USkeletalMeshComponent* Mesh = Run.Climber->GetMesh();
+	for (int32 Grip = 0; Grip < 3; ++Grip)
+	{
+		FBox Bounds;
+		Run.Arena->GetLedgeBounds(Grip, Run.Climber->GetCurrentLane(), Bounds);
+		// Evaluate actual animated bones over the idle cycle, not only the capsule or first pose.
+		for (int32 Frame = 0; Frame < 60; ++Frame)
+		{
+			Mesh->TickAnimation(0.05f, false);
+			Mesh->RefreshBoneTransforms();
+			for (const TCHAR* Side : { TEXT("l"), TEXT("r") })
+			{
+				const FVector Tip = Mesh->GetSocketLocation(FName(*FString::Printf(TEXT("middle_03_%s"), Side)));
+				const FVector Parent = Mesh->GetSocketLocation(FName(*FString::Printf(TEXT("middle_02_%s"), Side)));
+				const FVector Contact = Tip + (Tip - Parent).GetSafeNormal() * 2.f * Mesh->GetComponentScale().GetAbsMax();
+				const FVector Wrist = Mesh->GetSocketLocation(FName(*FString::Printf(TEXT("hand_%s"), Side)));
+				TestTrue(TEXT("The wrist remains outside the ledge face"), Wrist.X < Bounds.Min.X - 4.f);
+				if (!TestTrue(TEXT("Fingertips remain at the front lip"), FMath::Abs(Contact.X - (Bounds.Min.X - 2.5)) < 2.0)
+					|| !TestTrue(TEXT("Fingertips stay at the top surface throughout idle"), FMath::Abs(Contact.Z - (Bounds.Max.Z + 2.5)) < 2.0))
+				{
+					AddInfo(FString::Printf(TEXT("Contact %s; lip X %.2f, top Z %.2f"), *Contact.ToString(), Bounds.Min.X, Bounds.Max.Z));
+					return false;
+				}
+			}
+		}
+		Run.Climber->LeapToLane(1 - Run.Climber->GetCurrentLane());
+		FBox Unused;
+		TestFalse(TEXT("Hands release during a jump"), Run.Climber->GetHandLedgeBounds(Unused));
+		Run.Climber->Tick(ClimbRunRules::JumpDuration + 0.01f);
+		Run.Climber->Tick(0.12f);
+		Run.Arena->Tick(0.f);
+	}
 	return true;
 }
 

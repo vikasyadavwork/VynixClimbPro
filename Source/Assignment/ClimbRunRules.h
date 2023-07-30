@@ -14,6 +14,23 @@ namespace ClimbRunRules
 
     inline float LaneY(int32 Lane) { return Lane == 0 ? -LaneOffset : LaneOffset; }
 
+    // The cliff faces -X. Bounds must already include the mesh pivot and instance scale.
+    inline bool TryHangLocation(const FBox& Bounds, float DesiredY, float CapsuleRadius,
+        float Clearance, float HandHeight, FVector& OutLocation)
+    {
+        if (!Bounds.IsValid || Bounds.Min.ContainsNaN() || Bounds.Max.ContainsNaN()
+            || !FMath::IsFinite(DesiredY) || !FMath::IsFinite(CapsuleRadius)
+            || !FMath::IsFinite(Clearance) || !FMath::IsFinite(HandHeight)
+            || CapsuleRadius <= 0.f || Clearance < 0.f) return false;
+        const double Margin = CapsuleRadius + Clearance;
+        const FVector Size = Bounds.GetSize();
+        if (Size.X <= 0.0 || Size.Z <= 0.0 || Size.Y < 2.0 * Margin) return false;
+        OutLocation = FVector(Bounds.Min.X - Margin,
+            FMath::Clamp(static_cast<double>(DesiredY), Bounds.Min.Y + Margin, Bounds.Max.Y - Margin),
+            Bounds.Max.Z - HandHeight);
+        return true;
+    }
+
     inline FVector JumpPosition(const FVector& Start, const FVector& Target, float Alpha)
     {
         if (Alpha <= 0.f) return Start;

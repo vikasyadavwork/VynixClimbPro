@@ -21,7 +21,12 @@ if (!(Test-Path -LiteralPath (Join-Path $ProjectRoot 'Content\Endless\Maps\Endle
 }
 
 $ReportDirectory = Join-Path $ProjectRoot 'Saved\Automation'
+$ValidationLog = Join-Path $ProjectRoot 'Saved\Logs\VynixValidation.log'
 # The Fab browser cannot restore an editor tab without an RHI; skip it only in this headless process.
-& $Editor $ProjectFile -NullRHI -unattended -nop4 -nosound '-DisablePlugins=Fab' '-ExecCmds=Automation RunTests Vynix' '-TestExit=Automation Test Queue Empty' "-ReportExportPath=$ReportDirectory" -stdout -FullStdOutLogOutput
+& $Editor $ProjectFile -NullRHI -unattended -nop4 -nosound '-DisablePlugins=Fab' '-ExecCmds=Automation RunTests Vynix' '-TestExit=Automation Test Queue Empty' "-ReportExportPath=$ReportDirectory" "-abslog=$ValidationLog" -stdout -FullStdOutLogOutput
 if ($LASTEXITCODE -ne 0) { throw 'Automation tests failed. See Saved/Automation and Saved/Logs.' }
+# Unreal's test result can still be green when a Blueprint failed before the suite started.
+if (Select-String -LiteralPath $ValidationLog -Pattern 'LogBlueprint: Error:|LogLinker: Error:|LogTemp: Error:') {
+    throw "Startup or game errors were found in $ValidationLog"
+}
 Write-Host "Build and automation completed. Reports: $ReportDirectory"

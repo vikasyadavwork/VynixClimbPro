@@ -15,7 +15,22 @@
 AEndlessClimbGameMode::AEndlessClimbGameMode()
 {
     DefaultPawnClass = AEndlessClimber::StaticClass();
+    ClimberClass = FSoftObjectPath(TEXT("/Game/Endless/Payton/BP_EndlessPayton.BP_EndlessPayton_C"));
     HUDClass = AEndlessClimbHUD::StaticClass();
+}
+
+void AEndlessClimbGameMode::InitGame(const FString& MapName, const FString& Options, FString& ErrorMessage)
+{
+    // MetaHuman face graphs require LiveLink to finish loading before resolving the Blueprint.
+    if (UClass* Payton = ClimberClass.LoadSynchronous())
+    {
+        DefaultPawnClass = Payton;
+        // The native CDO survives level travel. Retain the character's assets so a
+        // restart does not rebuild legacy MetaHuman meshes and groom bindings.
+        GetMutableDefault<AEndlessClimbGameMode>()->ResidentClimberClass = Payton;
+    }
+    else UE_LOG(LogTemp, Error, TEXT("Vynix: the Payton player class could not be loaded"));
+    Super::InitGame(MapName, Options, ErrorMessage);
 }
 
 void AEndlessClimbGameMode::BeginPlay()

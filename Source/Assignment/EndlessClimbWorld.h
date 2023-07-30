@@ -30,6 +30,13 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Climb|Warning")
 	float GetWarningDuration() const { return WarningDuration; }
 
+	bool GetLedgeBounds(int32 ClimbStep, int32 Lane, FBox& OutBounds) const;
+	bool GetGripLocation(int32 ClimbStep, int32 Lane, FVector& OutLocation) const;
+
+	/** Physical size in centimetres: depth (X), width (Y), thickness (Z). */
+	UPROPERTY(EditAnywhere, Category = "Climb|Geometry", meta = (ClampMin = "1"))
+	FVector LedgeDimensions = FVector(105.f, 175.f, 26.f);
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;

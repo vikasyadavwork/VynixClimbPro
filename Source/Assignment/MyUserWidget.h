@@ -24,9 +24,9 @@ public:
 
 	    //CREATED PROGRESSBAR OBJECT AND A TEXT BLOCK 
 		UPROPERTY(Transient)
-		class UProgressBar* MyProgressBar = nullptr;
+		class UProgressBar* NativeProgressBar = nullptr;
 		UPROPERTY(Transient)
-	    class UTextBlock* MyText = nullptr;
+	    class UTextBlock* NativeText = nullptr;
 		
 		
 

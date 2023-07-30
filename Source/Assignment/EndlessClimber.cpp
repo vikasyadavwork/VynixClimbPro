@@ -1,6 +1,9 @@
 #include "EndlessClimber.h"
 #include "ClimbRunRules.h"
 #include "ClimbSaveGame.h"
+#include "EndlessClimbWorld.h"
+#include "ClimbHandIKAnimInstance.h"
+#include "GroomComponent.h"
 #include "Animation/AnimSequence.h"
 #include "Animation/AnimSingleNodeInstance.h"
 #include "Camera/CameraComponent.h"
@@ -20,7 +23,7 @@
 
 namespace { const TCHAR* SaveSlot = TEXT("VynixClimbBestRun"); }
 
-AEndlessClimber::AEndlessClimber()
+AEndlessClimber::AEndlessClimber(const FObjectInitializer& ObjectInitializer) : Super(ObjectInitializer)
 {
     PrimaryActorTick.bCanEverTick = true;
     GetCapsuleComponent()->InitCapsuleSize(36.f, 96.f);
@@ -44,25 +47,27 @@ AEndlessClimber::AEndlessClimber()
     RightAnimation = Right.Object;
     UpAnimation = Up.Object;
 
-    CameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("ClimbCameraBoom"));
-    CameraBoom->SetupAttachment(RootComponent);
-    CameraBoom->TargetArmLength = 1250.f;
-    CameraBoom->SetUsingAbsoluteRotation(true);
-    CameraBoom->SetRelativeRotation(FRotator(0, 0, 0));
-    CameraBoom->TargetOffset = FVector(0, 0, 190);
-    CameraBoom->bDoCollisionTest = false;
-    CameraBoom->bEnableCameraLag = true;
-    CameraBoom->CameraLagSpeed = 5.f;
-    CameraBoom->CameraLagMaxDistance = 220.f;
-    FollowCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("ClimbCamera"));
-    FollowCamera->SetupAttachment(CameraBoom, USpringArmComponent::SocketName);
-    FollowCamera->FieldOfView = 62.f;
-    FollowCamera->PostProcessSettings.bOverride_AutoExposureMethod = true;
-    FollowCamera->PostProcessSettings.AutoExposureMethod = EAutoExposureMethod::AEM_Manual;
-    FollowCamera->PostProcessSettings.bOverride_AutoExposureBias = true;
-    FollowCamera->PostProcessSettings.AutoExposureBias = 2.f;
-    FollowCamera->PostProcessSettings.bOverride_AutoExposureApplyPhysicalCameraExposure = true;
-    FollowCamera->PostProcessSettings.AutoExposureApplyPhysicalCameraExposure = false;
+    ArcadeCameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("ClimbArcadeCameraBoom"));
+    ArcadeCameraBoom->SetupAttachment(RootComponent);
+    ArcadeCameraBoom->TargetArmLength = 1250.f;
+    ArcadeCameraBoom->SetUsingAbsoluteRotation(true);
+    ArcadeCameraBoom->SetRelativeRotation(FRotator(0, 0, 0));
+    ArcadeCameraBoom->TargetOffset = FVector(0, 0, 190);
+    ArcadeCameraBoom->bDoCollisionTest = false;
+    ArcadeCameraBoom->bEnableCameraLag = true;
+    ArcadeCameraBoom->CameraLagSpeed = 5.f;
+    ArcadeCameraBoom->CameraLagMaxDistance = 220.f;
+    ArcadeCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("ClimbCamera"));
+    ArcadeCamera->SetupAttachment(ArcadeCameraBoom, USpringArmComponent::SocketName);
+    ArcadeCamera->FieldOfView = 62.f;
+    ArcadeCamera->PostProcessSettings.bOverride_AutoExposureMethod = true;
+    ArcadeCamera->PostProcessSettings.AutoExposureMethod = EAutoExposureMethod::AEM_Manual;
+    ArcadeCamera->PostProcessSettings.bOverride_AutoExposureBias = true;
+    ArcadeCamera->PostProcessSettings.AutoExposureBias = 2.f;
+    ArcadeCamera->PostProcessSettings.bOverride_AutoExposureApplyPhysicalCameraExposure = true;
+    ArcadeCamera->PostProcessSettings.AutoExposureApplyPhysicalCameraExposure = false;
+    ArcadeCamera->PostProcessSettings.bOverride_MotionBlurAmount = true;
+    ArcadeCamera->PostProcessSettings.MotionBlurAmount = 0.f;
 
     static ConstructorHelpers::FObjectFinder<UStaticMesh> Sphere(TEXT("/Engine/BasicShapes/Sphere.Sphere"));
     for (int32 Index = 0; Index < 10; ++Index)
@@ -81,13 +86,32 @@ AEndlessClimber::AEndlessClimber()
 
 void AEndlessClimber::BeginPlay()
 {
-    Super::BeginPlay();
+    // Keep the original Blueprint's cosmetic construction, but use only arcade input/movement.
+    ACharacter::BeginPlay();
     SetActorLocation(RunOrigin + FVector(0, ClimbRunRules::LaneY(CurrentLane), ClimbRunRules::StartingHeight));
     SetActorRotation(FRotator::ZeroRotator);
     GetCharacterMovement()->StopMovementImmediately();
     GetCharacterMovement()->DisableMovement();
+    GetCharacterMovement()->SetComponentTickEnabled(false);
+    TInlineComponentArray<UCameraComponent*> Cameras(this);
+    for (UCameraComponent* Camera : Cameras) Camera->SetActive(Camera == ArcadeCamera);
+    // Use Payton's supplied hair cards for the arcade camera and close views alike.
+    // They avoid the legacy strand LOD disappearing on lower-end graphics hardware.
+    TInlineComponentArray<UGroomComponent*> Grooms(this);
+    for (UGroomComponent* Groom : Grooms)
+        if (Groom->GetFName() == TEXT("Hair")) Groom->SetUseCards(true);
+    RestMeshRotation = GetMesh()->GetRelativeRotation();
     IdleSeconds = 1.f;
     PlayClimbAnimation(HangAnimation, true);
+    GetMesh()->TickAnimation(0.f, false);
+    GetMesh()->RefreshBoneTransforms();
+    if (GetMesh()->DoesSocketExist(TEXT("hand_l")) && GetMesh()->DoesSocketExist(TEXT("hand_r")))
+    {
+        const FVector Hands = (GetMesh()->GetSocketLocation(TEXT("hand_l"))
+            + GetMesh()->GetSocketLocation(TEXT("hand_r"))) * 0.5;
+        HangHandHeight = Hands.Z - GetActorLocation().Z;
+    }
+    bGripReady = true;
     if (UGameplayStatics::DoesSaveGameExist(SaveSlot, 0))
     {
         if (UClimbSaveGame* Saved = Cast<UClimbSaveGame>(UGameplayStatics::LoadGameFromSlot(SaveSlot, 0)))
@@ -111,7 +135,7 @@ void AEndlessClimber::BeginPlay()
 
 void AEndlessClimber::SetupPlayerInputComponent(UInputComponent* Input)
 {
-    Super::SetupPlayerInputComponent(Input);
+    ACharacter::SetupPlayerInputComponent(Input);
     Input->BindKey(EKeys::A, IE_Pressed, this, &AEndlessClimber::LeapLeft);
     Input->BindKey(EKeys::Left, IE_Pressed, this, &AEndlessClimber::LeapLeft);
     Input->BindKey(EKeys::D, IE_Pressed, this, &AEndlessClimber::LeapRight);
@@ -132,6 +156,25 @@ void AEndlessClimber::SetupPlayerInputComponent(UInputComponent* Input)
 void AEndlessClimber::LeapLeft() { RequestDodge(0); }
 void AEndlessClimber::LeapRight() { RequestDodge(1); }
 void AEndlessClimber::LeapUp() { LeapToLane(CurrentLane); }
+
+bool AEndlessClimber::CalculateGrip(const FBox& Bounds, float DesiredY, FVector& OutLocation) const
+{
+    return ClimbRunRules::TryHangLocation(Bounds, DesiredY,
+        GetCapsuleComponent()->GetScaledCapsuleRadius(), GripClearance, HangHandHeight, OutLocation);
+}
+
+bool AEndlessClimber::GetHandLedgeBounds(FBox& OutBounds) const
+{
+    return !bLeaping && ClimbArena.IsValid()
+        && ClimbArena->GetLedgeBounds(CompletedJumps, CurrentLane, OutBounds);
+}
+
+void AEndlessClimber::AttachToArena(AEndlessClimbWorld* Arena)
+{
+    ClimbArena = Arena;
+    FVector Grip;
+    if (Arena && Arena->GetGripLocation(CompletedJumps, CurrentLane, Grip)) SetActorLocation(Grip);
+}
 
 void AEndlessClimber::GamepadConfirm()
 {
@@ -169,11 +212,12 @@ void AEndlessClimber::TouchPressed(ETouchIndex::Type FingerIndex, FVector Locati
 void AEndlessClimber::LeapToLane(int32 Lane)
 {
     if (bLeaping || bRunOver || bRunPaused || Lane < 0 || Lane > 1 || IdleSeconds < 0.10f) return;
+    FVector Grip;
+    if (!ClimbArena.IsValid() || !ClimbArena->GetGripLocation(CompletedJumps + 1, Lane, Grip)) return;
     if (IdleSeconds > 2.2f) Combo = 0;
     TargetLane = Lane;
     JumpStart = GetActorLocation();
-    JumpTarget = RunOrigin + FVector(0, ClimbRunRules::LaneY(Lane),
-        ClimbRunRules::StartingHeight + (static_cast<double>(CompletedJumps) + 1.0) * ClimbRunRules::StepHeight);
+    JumpTarget = Grip;
     JumpElapsed = 0.f;
     bLeaping = true;
     JumpFeedback = 1.f;
@@ -201,7 +245,9 @@ void AEndlessClimber::Tick(float DeltaSeconds)
         JumpElapsed += DeltaSeconds;
         const float Alpha = JumpElapsed / ClimbRunRules::JumpDuration;
         SetActorLocation(ClimbRunRules::JumpPosition(JumpStart, JumpTarget, Alpha), false);
-        GetMesh()->SetRelativeRotation(FRotator(0, -90, FMath::Sin(FMath::Min(1.f, Alpha) * PI) * (TargetLane == 0 ? -12.f : 12.f)));
+        FRotator Lean = RestMeshRotation;
+        Lean.Roll += FMath::Sin(FMath::Min(1.f, Alpha) * PI) * (TargetLane == 0 ? -8.f : 8.f);
+        GetMesh()->SetRelativeRotation(Lean);
         if (Alpha >= 1.f) FinishLeap();
     }
     else
@@ -220,8 +266,8 @@ void AEndlessClimber::Tick(float DeltaSeconds)
         }
     }
     const float Shake = FMath::Sin(GetWorld()->GetTimeSeconds() * 65.f) * DamageFeedback * 7.f;
-    CameraBoom->SocketOffset = FVector(0, Shake, JumpFeedback * 10.f);
-    FollowCamera->SetFieldOfView(FMath::FInterpTo(FollowCamera->FieldOfView, bLeaping ? 65.f : 62.f, DeltaSeconds, 6.f));
+    ArcadeCameraBoom->SocketOffset = FVector(0, Shake, JumpFeedback * 10.f);
+    ArcadeCamera->SetFieldOfView(FMath::FInterpTo(ArcadeCamera->FieldOfView, bLeaping ? 65.f : 62.f, DeltaSeconds, 6.f));
 }
 
 void AEndlessClimber::FinishLeap()
@@ -235,7 +281,7 @@ void AEndlessClimber::FinishLeap()
     JumpBonus = static_cast<int32>(FMath::Min<int64>(NewBonus, MAX_int32));
     HeightMetres = static_cast<double>(CompletedJumps) * ClimbRunRules::StepHeight / 100.0;
     IdleSeconds = 0.f;
-    GetMesh()->SetRelativeRotation(FRotator(0, -90, 0));
+    GetMesh()->SetRelativeRotation(RestMeshRotation);
     PlayClimbAnimation(HangAnimation, true);
     if (CompletedJumps % 25 == 0) Health = FMath::Min(100.f, Health + 10.f);
 }
@@ -244,9 +290,13 @@ void AEndlessClimber::PlayClimbAnimation(UAnimSequence* Animation, bool bLoop)
 {
     if (!Animation) return;
     Animation->bForceRootLock = true;
-    GetMesh()->PlayAnimation(Animation, bLoop);
+    if (!Cast<UClimbHandIKAnimInstance>(GetMesh()->GetAnimInstance()))
+        GetMesh()->SetAnimInstanceClass(UClimbHandIKAnimInstance::StaticClass());
     if (UAnimSingleNodeInstance* Instance = GetMesh()->GetSingleNodeInstance())
     {
+        Instance->SetAnimationAsset(Animation, bLoop, bLoop ? 1.f : Animation->GetPlayLength() / ClimbRunRules::JumpDuration);
+        Instance->SetPosition(0.f, false);
+        Instance->SetPlaying(true);
         // The capsule owns travel; root motion must not move the mesh away from it.
         Instance->SetRootMotionMode(ERootMotionMode::IgnoreRootMotion);
         Instance->SetPlayRate(bLoop ? 1.f : Animation->GetPlayLength() / ClimbRunRules::JumpDuration);
@@ -294,7 +344,7 @@ void AEndlessClimber::ApplyRockHit(float Damage)
     {
         bRunOver = true;
         bLeaping = false;
-        GetMesh()->SetRelativeRotation(FRotator(0, -90, 0));
+        GetMesh()->SetRelativeRotation(RestMeshRotation);
         PlayClimbAnimation(HangAnimation, true);
         SaveBestRun();
     }

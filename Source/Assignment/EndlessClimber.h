@@ -1,21 +1,22 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Character.h"
+#include "MyCharacter.h"
 #include "EndlessClimber.generated.h"
 
 class UAnimSequence;
 class UCameraComponent;
 class USpringArmComponent;
 class UStaticMeshComponent;
+class AEndlessClimbWorld;
 
 /** A two-lane arcade climber. The original free-climbing character is still available. */
 UCLASS()
-class ASSIGNMENT_API AEndlessClimber : public ACharacter
+class ASSIGNMENT_API AEndlessClimber : public AMyCharacter
 {
     GENERATED_BODY()
 public:
-    AEndlessClimber();
+    AEndlessClimber(const FObjectInitializer& ObjectInitializer = FObjectInitializer::Get());
     virtual void Tick(float DeltaSeconds) override;
     virtual void SetupPlayerInputComponent(UInputComponent* PlayerInputComponent) override;
     virtual float TakeDamage(float DamageAmount, const FDamageEvent& DamageEvent,
@@ -36,6 +37,12 @@ public:
     UFUNCTION(BlueprintPure) int32 GetIntendedLane() const { return bLeaping ? TargetLane : CurrentLane; }
     UFUNCTION(BlueprintPure) FVector GetRunOrigin() const { return RunOrigin; }
     UFUNCTION(BlueprintPure) bool IsLeaping() const { return bLeaping; }
+    int32 GetCompletedJumps() const { return CompletedJumps; }
+    float GetHangHandHeight() const { return HangHandHeight; }
+    bool IsGripReady() const { return bGripReady; }
+    void AttachToArena(AEndlessClimbWorld* Arena);
+    bool CalculateGrip(const FBox& LedgeBounds, float DesiredY, FVector& OutLocation) const;
+    bool GetHandLedgeBounds(FBox& OutBounds) const;
     UFUNCTION(BlueprintCallable) void ApplyRockHit(float Damage);
     UFUNCTION(BlueprintCallable) void RestartRun();
     UFUNCTION(BlueprintCallable) void ToggleRunPause();
@@ -57,17 +64,21 @@ private:
     void SaveBestRun();
     void UpdateJumpEffects(float DeltaSeconds);
 
-    UPROPERTY(VisibleAnywhere) TObjectPtr<USpringArmComponent> CameraBoom;
-    UPROPERTY(VisibleAnywhere) TObjectPtr<UCameraComponent> FollowCamera;
-    UPROPERTY() TObjectPtr<UAnimSequence> HangAnimation;
-    UPROPERTY() TObjectPtr<UAnimSequence> LeftAnimation;
-    UPROPERTY() TObjectPtr<UAnimSequence> RightAnimation;
-    UPROPERTY() TObjectPtr<UAnimSequence> UpAnimation;
+    UPROPERTY(VisibleAnywhere) TObjectPtr<USpringArmComponent> ArcadeCameraBoom;
+    UPROPERTY(VisibleAnywhere) TObjectPtr<UCameraComponent> ArcadeCamera;
+    UPROPERTY(EditDefaultsOnly, Category = "Climb|Animation") TObjectPtr<UAnimSequence> HangAnimation;
+    UPROPERTY(EditDefaultsOnly, Category = "Climb|Animation") TObjectPtr<UAnimSequence> LeftAnimation;
+    UPROPERTY(EditDefaultsOnly, Category = "Climb|Animation") TObjectPtr<UAnimSequence> RightAnimation;
+    UPROPERTY(EditDefaultsOnly, Category = "Climb|Animation") TObjectPtr<UAnimSequence> UpAnimation;
+    UPROPERTY(EditDefaultsOnly, Category = "Climb|Grip", meta = (ClampMin = "0")) float GripClearance = 8.f;
+    UPROPERTY() TWeakObjectPtr<AEndlessClimbWorld> ClimbArena;
     UPROPERTY() TArray<TObjectPtr<UStaticMeshComponent>> ChalkTrail;
 
     FVector RunOrigin = FVector(0, 0, 20000);
     FVector JumpStart = FVector::ZeroVector;
     FVector JumpTarget = FVector::ZeroVector;
+    FRotator RestMeshRotation = FRotator(0, -90, 0);
+    float HangHandHeight = 70.f;
     float Health = 100.f;
     double HeightMetres = 0.0;
     double SurvivalSeconds = 0.0;
@@ -92,4 +103,5 @@ private:
     bool bLeaping = false;
     bool bRunOver = false;
     bool bRunPaused = false;
+    bool bGripReady = false;
 };

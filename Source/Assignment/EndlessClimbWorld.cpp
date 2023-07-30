@@ -1,6 +1,7 @@
 #include "EndlessClimbWorld.h"
 
 #include "ClimbFallingRock.h"
+#include "ClimbRunRules.h"
 #include "EndlessClimber.h"
 #include "Components/InstancedStaticMeshComponent.h"
 #include "Components/PointLightComponent.h"
@@ -82,11 +83,32 @@ void AEndlessClimbWorld::FindClimber()
 	}
 	for (TActorIterator<AEndlessClimber> It(GetWorld()); It; ++It)
 	{
+		if (!It->IsGripReady()) continue;
 		Climber = *It;
 		SetActorLocation(It->GetRunOrigin());
 		BuildArena();
+		It->AttachToArena(this);
 		return;
 	}
+}
+
+bool AEndlessClimbWorld::GetLedgeBounds(int32 ClimbStep, int32 Lane, FBox& OutBounds) const
+{
+	if (!bArenaBuilt || ClimbStep < 0 || Lane < 0 || Lane > 1 || !Ledges->GetStaticMesh()) return false;
+	const int32 Slot = SectionIndices.Find(ClimbStep / StepsPerSection);
+	if (Slot == INDEX_NONE) return false;
+	const int32 Instance = Slot * StepsPerSection * 2 + (ClimbStep % StepsPerSection) * 2 + Lane;
+	FTransform Transform;
+	if (!Ledges->GetInstanceTransform(Instance, Transform, true)) return false;
+	OutBounds = Ledges->GetStaticMesh()->GetBounds().GetBox().TransformBy(Transform);
+	return OutBounds.IsValid != 0;
+}
+
+bool AEndlessClimbWorld::GetGripLocation(int32 ClimbStep, int32 Lane, FVector& OutLocation) const
+{
+	FBox Bounds;
+	return Climber.IsValid() && GetLedgeBounds(ClimbStep, Lane, Bounds)
+		&& Climber->CalculateGrip(Bounds, Bounds.GetCenter().Y, OutLocation);
 }
 
 UMaterialInterface* AEndlessClimbWorld::MakeColoredMaterial(const FLinearColor& Color)
@@ -150,14 +172,21 @@ void AEndlessClimbWorld::UpdateSection(int32 Slot, int32 LogicalIndex, bool bAdd
 	PutInstance(Cliff, Slot, FVector(155.f, 0.f, Bottom + SectionHeight * .5f), FVector(1.6f, 11.f, 7.2f));
 	for (int32 Step = 0; Step < StepsPerSection; ++Step)
 	{
-		// The character starts at origin + 300; the capsule's feet are 96 lower.
-		const double FootHeight = Bottom + 204.f + Step * StepHeight;
+		const double GripHeight = Bottom + ClimbRunRules::StartingHeight + Climber->GetHangHandHeight() + Step * StepHeight;
+		const FBoxSphereBounds MeshBounds = Ledges->GetStaticMesh()->GetBounds();
+		const FVector Dimensions = LedgeDimensions.ComponentMax(FVector(1.f));
+		const FVector Scale = Dimensions / (MeshBounds.BoxExtent * 2.0).ComponentMax(FVector(0.01));
+		// Embed the back edge 20 cm into the wall; changing depth moves the front edge.
+		const double BackEdge = 95.0;
+		const double FrontEdge = BackEdge - Dimensions.X;
 		for (int32 Lane = 0; Lane < 2; ++Lane)
 		{
 			const int32 Index = Slot * StepsPerSection * 2 + Step * 2 + Lane;
 			const float LaneY = Lane == 0 ? -190.f : 190.f;
-			PutInstance(Ledges, Index, FVector(43.f, LaneY, FootHeight - 13.f), FVector(1.05f, 1.75f, .26f));
-			PutInstance(LedgeEdges, Index, FVector(-11.f, LaneY, FootHeight - 5.f), FVector(.035f, 1.67f, .055f));
+			const FVector Center(BackEdge - Dimensions.X * 0.5, LaneY, GripHeight - Dimensions.Z * 0.5);
+			PutInstance(Ledges, Index, Center - MeshBounds.Origin * Scale, Scale);
+			PutInstance(LedgeEdges, Index, FVector(FrontEdge - 2.f, LaneY, GripHeight - 5.f),
+				FVector(.035f, FMath::Max(1.0, Dimensions.Y - 8.0) / 100.0, .055f));
 		}
 		PutInstance(Seams, Slot * StepsPerSection + Step,
 			FVector(73.8f, DecorationRandom.FRandRange(-30.f, 30.f), Bottom + Step * StepHeight + 112.f),
@@ -286,8 +315,8 @@ void AEndlessClimbWorld::ReleaseRock()
 	{
 		return;
 	}
-	FVector SpawnLocation = Player->GetRunOrigin();
-	SpawnLocation.Y += WarningLane == 0 ? -190.f : 190.f;
+	FVector SpawnLocation;
+	if (!GetGripLocation(Player->GetCompletedJumps(), WarningLane, SpawnLocation)) return;
 	SpawnLocation.Z = Player->GetActorLocation().Z + HazardRandom.FRandRange(760.f, 940.f);
 	FActorSpawnParameters Parameters;
 	Parameters.Owner = this;
@@ -315,16 +344,18 @@ void AEndlessClimbWorld::UpdateWarningVisuals(float DeltaSeconds)
 	}
 	WarningAge += DeltaSeconds;
 	const float Pulse = .5f + .5f * FMath::Sin(WarningAge * 13.f);
-	const FVector Origin = Player->GetRunOrigin();
-	const float LaneY = WarningLane == 0 ? -190.f : 190.f;
+	FVector Grip;
+	FBox Bounds;
+	if (!GetGripLocation(Player->GetCompletedJumps(), WarningLane, Grip)
+		|| !GetLedgeBounds(Player->GetCompletedJumps(), WarningLane, Bounds)) return;
 	const double Height = Player->GetActorLocation().Z;
-	WarningBeacon->SetWorldLocation(FVector(Origin.X - 20.f, Origin.Y + LaneY, Height + 470.f));
+	WarningBeacon->SetWorldLocation(FVector(Grip.X, Grip.Y, Height + 470.f));
 	WarningBeacon->SetWorldScale3D(FVector(.20f + Pulse * .09f));
-	WarningLeftRail->SetWorldLocation(FVector(Origin.X - 24.f, Origin.Y + LaneY - 83.f, Height + 180.f));
-	WarningRightRail->SetWorldLocation(FVector(Origin.X - 24.f, Origin.Y + LaneY + 83.f, Height + 180.f));
+	WarningLeftRail->SetWorldLocation(FVector(Bounds.Min.X - 8.f, Bounds.Min.Y + 4.f, Height + 180.f));
+	WarningRightRail->SetWorldLocation(FVector(Bounds.Min.X - 8.f, Bounds.Max.Y - 4.f, Height + 180.f));
 	WarningLeftRail->SetWorldScale3D(FVector(.03f, .025f + Pulse * .012f, 5.8f));
 	WarningRightRail->SetWorldScale3D(WarningLeftRail->GetComponentScale());
-	WarningLight->SetWorldLocation(FVector(Origin.X - 145.f, Origin.Y + LaneY, Height + 160.f));
+	WarningLight->SetWorldLocation(FVector(Grip.X - 100.f, Grip.Y, Height + 160.f));
 	WarningLight->SetIntensity(900.f + Pulse * 1700.f);
 }
 

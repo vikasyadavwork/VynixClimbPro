@@ -10,5 +10,7 @@ public class Assignment : ModuleRules
 
 		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "HeadMountedDisplay", "EnhancedInput", "UMG" });
 		PrivateDependencyModuleNames.Add("SlateCore");
+		PrivateDependencyModuleNames.Add("AnimationCore");
+		PrivateDependencyModuleNames.Add("HairStrandsCore");
 	}
 }
