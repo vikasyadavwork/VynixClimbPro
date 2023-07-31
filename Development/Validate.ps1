@@ -22,9 +22,20 @@ if (!(Test-Path -LiteralPath (Join-Path $ProjectRoot 'Content\Endless\Maps\Endle
 
 $ReportDirectory = Join-Path $ProjectRoot 'Saved\Automation'
 $ValidationLog = Join-Path $ProjectRoot 'Saved\Logs\VynixValidation.log'
+$ValidationStarted = [DateTime]::UtcNow
 # The Fab browser cannot restore an editor tab without an RHI; skip it only in this headless process.
 & $Editor $ProjectFile -NullRHI -unattended -nop4 -nosound '-DisablePlugins=Fab' '-ExecCmds=Automation RunTests Vynix' '-TestExit=Automation Test Queue Empty' "-ReportExportPath=$ReportDirectory" "-abslog=$ValidationLog" -stdout -FullStdOutLogOutput
 if ($LASTEXITCODE -ne 0) { throw 'Automation tests failed. See Saved/Automation and Saved/Logs.' }
+# TestExit can return zero after failed tests; the exported report is authoritative.
+$ReportPath = Join-Path $ReportDirectory 'index.json'
+if ((Get-Item -LiteralPath $ReportPath).LastWriteTimeUtc -lt $ValidationStarted) {
+    throw 'Unreal did not export a fresh automation report.'
+}
+$Report = Get-Content -LiteralPath $ReportPath -Raw | ConvertFrom-Json
+if ($Report.failed -gt 0 -or $Report.notRun -gt 0 -or $Report.inProcess -gt 0 -or
+    ($Report.succeeded + $Report.succeededWithWarnings) -lt 1) {
+    throw 'The automation report contains failed, incomplete, or no tests. See Saved/Automation.'
+}
 # Unreal's test result can still be green when a Blueprint failed before the suite started.
 if (Select-String -LiteralPath $ValidationLog -Pattern 'LogBlueprint: Error:|LogLinker: Error:|LogTemp: Error:') {
     throw "Startup or game errors were found in $ValidationLog"

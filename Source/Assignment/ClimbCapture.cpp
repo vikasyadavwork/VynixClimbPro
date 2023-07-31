@@ -10,6 +10,7 @@
 #include "Kismet/GameplayStatics.h"
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
+#include "Misc/App.h"
 #include "TimerManager.h"
 #include "Containers/Ticker.h"
 #include "Components/SkeletalMeshComponent.h"
@@ -49,6 +50,47 @@ void StartClimbCapture(UWorld* World)
         return;
     }
 #endif
+    if (FParse::Param(FCommandLine::Get(), TEXT("VynixJumpCapture")))
+    {
+        FApp::SetUseFixedTimeStep(true);
+        FApp::SetFixedDeltaTime(1.0 / 60.0);
+        // Side views at early/middle/late poses expose mesh penetration that the
+        // normal gameplay camera and capsule-only checks cannot show.
+        const TSharedRef<TWeakObjectPtr<ACameraActor>> Camera = MakeShared<TWeakObjectPtr<ACameraActor>>();
+        for (int32 Jump = 0; Jump < 3; ++Jump)
+        {
+            const float StartTime = 1.f + Jump * 2.f;
+            Schedule(StartTime, [WeakWorld, Jump]
+            {
+                if (UWorld* ActiveWorld = WeakWorld.Get())
+                    for (TActorIterator<AEndlessClimber> It(ActiveWorld); It; ++It)
+                        It->LeapToLane(Jump == 0 ? 1 : 0);
+            });
+            for (int32 Frame = 0; Frame < 3; ++Frame)
+            {
+                Schedule(StartTime + 0.12f + Frame * 0.16f, [WeakWorld, Camera, Jump, Frame]
+                {
+                    if (UWorld* ActiveWorld = WeakWorld.Get())
+                        for (TActorIterator<AEndlessClimber> It(ActiveWorld); It; ++It)
+                            if (APlayerController* PC = Cast<APlayerController>(It->GetController()))
+                            {
+                                if (!Camera->IsValid()) *Camera = ActiveWorld->SpawnActor<ACameraActor>();
+                                const FVector Position = It->GetActorLocation() + FVector(-180, -620, 100);
+                                Camera->Get()->SetActorLocation(Position);
+                                Camera->Get()->SetActorRotation((It->GetActorLocation() + FVector(10, 0, 50) - Position).Rotation());
+                                Camera->Get()->GetCameraComponent()->SetFieldOfView(40.f);
+                                TInlineComponentArray<UCameraComponent*> PlayerCameras(*It);
+                                for (UCameraComponent* PlayerCamera : PlayerCameras)
+                                    if (PlayerCamera->IsActive()) Camera->Get()->GetCameraComponent()->PostProcessSettings = PlayerCamera->PostProcessSettings;
+                                PC->SetViewTarget(Camera->Get());
+                                FScreenshotRequest::RequestScreenshot(FString::Printf(TEXT("Vynix_Jump_%d_%d.png"), Jump, Frame), true, false);
+                            }
+                });
+            }
+        }
+        Schedule(7.f, [] { FPlatformMisc::RequestExit(false); });
+        return;
+    }
     static bool bCheckingRestart = false;
     Schedule(0.25f, [WeakWorld]
     {

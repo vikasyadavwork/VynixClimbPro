@@ -39,10 +39,12 @@ public:
     UFUNCTION(BlueprintPure) bool IsLeaping() const { return bLeaping; }
     int32 GetCompletedJumps() const { return CompletedJumps; }
     float GetHangHandHeight() const { return HangHandHeight; }
+    FVector GetHangPelvisOffset() const { return HangPelvisOffset; }
     bool IsGripReady() const { return bGripReady; }
     void AttachToArena(AEndlessClimbWorld* Arena);
     bool CalculateGrip(const FBox& LedgeBounds, float DesiredY, FVector& OutLocation) const;
     bool GetHandLedgeBounds(FBox& OutBounds) const;
+    bool GetJumpLedgeBounds(FBox& OutBounds) const;
     UFUNCTION(BlueprintCallable) void ApplyRockHit(float Damage);
     UFUNCTION(BlueprintCallable) void RestartRun();
     UFUNCTION(BlueprintCallable) void ToggleRunPause();
@@ -79,6 +81,7 @@ private:
     FVector JumpTarget = FVector::ZeroVector;
     FRotator RestMeshRotation = FRotator(0, -90, 0);
     float HangHandHeight = 70.f;
+    FVector HangPelvisOffset = FVector::ZeroVector;
     float Health = 100.f;
     double HeightMetres = 0.0;
     double SurvivalSeconds = 0.0;

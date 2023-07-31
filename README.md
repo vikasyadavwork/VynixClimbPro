@@ -25,9 +25,10 @@ The pause, resume, and restart buttons also accept mouse clicks. A dodge tapped 
 ## What's in the game
 
 - Endless ledges with recycled cliff sections. Height has no designed finish line, and old scenery is reused instead of accumulating.
-- The original Payton MetaHuman, including her clothing, face, and hair, with retargeted hanging and jumping animations, chalk trails, jump lean, and a gentle camera response.
+- The original Payton MetaHuman, including her clothing, face, and hair, with retargeted hanging and jumping animations, chalk trails, and a gentle camera response.
 - Hanging positions calculated from each ledge's actual mesh bounds, depth, width, and thickness. The capsule stays outside the front, the grip stays away from the corners, and the resting hand height meets the ledge top.
 - Two-bone arm IK plants the fingertips at the front lip after the hanging animation is evaluated. Hands release for jumps and replant on landing; the idle motion no longer drives them through the ledge.
+- Left, right, and upward jumps keep the same wall distance as the hanging pose. The animation's built-in travel is removed so the visible body follows the game's jump path once. Torso lean and reaching arms and legs are adjusted when a pose would intersect the ledge face.
 - Random small round stones using Chaos physics and continuous collision detection. A pulsing red lane and countdown appear **before** each stone spawns. The other lane stays clear until that stone passes.
 - 100 health, 25 damage per stone, and a short grace period after a hit. Every 25 completed jumps restores 10 health.
 - Score from height, survival time, and consecutive jumps. Jump again within 2.2 seconds to keep the combo (up to 10). Damage breaks the combo.
@@ -59,7 +60,7 @@ The project retains its original `Assignment` module name so existing Blueprints
 | File / folder | Purpose |
 | --- | --- |
 | `Source/Assignment/EndlessClimber.*` | Jump movement, health, score, input, feedback, persistence |
-| `Source/Assignment/ClimbHandIKAnimInstance.*` | Animation playback with hand contact at the actual ledge lip |
+| `Source/Assignment/ClimbHandIKAnimInstance.*` | Animation playback, jump body clearance, and hand contact at the ledge lip |
 | `Source/Assignment/EndlessClimbWorld.*` | Recycled cliff, lanes, and rock warning schedule |
 | `Source/Assignment/ClimbFallingRock.*` | Physics stones and damage detection |
 | `Source/Assignment/EndlessClimbHUD.*` | Scalable, animated Canvas UI |
@@ -77,7 +78,7 @@ The arcade loop is implemented in C++ and does not require editing a Widget Blue
 powershell -ExecutionPolicy Bypass -File Development/Validate.ps1
 ```
 
-This builds the editor target and runs the `VynixClimb` automation tests headlessly. The tests cover jump geometry, buffered dodges, score/health bounds, damage immunity, a long climb with bounded scenery, telegraphed rock spawning, and Payton's placement on resized ledges. Reports are written under `Saved/Automation`. See [validation notes](Documentation/Validation.md) for the checked behavior.
+This builds the editor target and runs the `VynixClimb` automation tests headlessly. The tests cover jump geometry, buffered dodges, score/health bounds, damage immunity, a long climb with bounded scenery, telegraphed rock spawning, and Payton's placement on resized ledges. Jump checks evaluate the actual animated bones throughout all three jump directions, including landing hand contact. Reports are written under `Saved/Automation`. See [validation notes](Documentation/Validation.md) for the checked behavior.
 
 To capture a short scripted visual check of ascent, jumping, a warning, health loss, and game over:
 
@@ -87,6 +88,8 @@ To capture a short scripted visual check of ascent, jumping, a warning, health l
 
 Screenshots go to `Saved/Screenshots`. The capture warms the editor's texture, hair, and shader queues, checks the hand contact from an oblique close-up, and checks pause/resume and level restart. It then exits automatically without writing best-run saves. `Development/CreateEndlessMap.py` can regenerate the small boot map through Unreal's Python commandlet if it is missing.
 
+Add `-VynixJumpCapture` to that command for nine side-view screenshots: early, middle, and late poses of right, left, and upward jumps. This makes it easier to check body clearance from the ledges.
+
 `LedgeDimensions` on `EndlessClimbWorld` specifies depth, width, and thickness in centimetres. The arena normalizes the mesh using its actual bounds, including an off-centre pivot. The player uses those transformed bounds and the scaled capsule radius with an 8 cm gap; ledges too narrow for that margin are rejected. The cliff faces negative X. Resting hand height is measured from the character's hanging pose, so the model's scale and proportions affect the grip height. Rock spawn depth and warning rails follow the same ledge geometry.
 
 The supplied Payton assets are ready to use. To regenerate them, first run `Development/PreparePaytonAnimations.py` with a full editor's `-ExecutePythonScript` option (UE 5.5's retargeter requires the Content Browser), then run `Development/CreateEndlessPayton.py` after compiling the editor target. The latter keeps the cosmetic construction and replaces the copied prototype EventGraph with the native arcade gameplay.
@@ -95,6 +98,17 @@ The arcade character uses Payton's supplied hair cards for consistent rendering 
 
 ## History
 
-The starting game was supplied as a 2023 project without Git history. The February–July 2023 commit dates in this repository are a **reconstructed learning sequence**, arranged at the owner's request; they are not a record of when these changes were actually made. The current project targets Unreal 5.5.
+The starting game was supplied as a 2023 project without Git history. The March–July 2023 commit dates in this repository are a **reconstructed learning sequence**, arranged at the owner's request; they are not a record of when these changes were actually made. The current project targets Unreal 5.5.
+
+| Date | Learning step |
+| --- | --- |
+| March 4, 2023 | Start with the original climbing prototype |
+| March 18, 2023 | Fix input and stamina problems |
+| April 9, 2023 | Add endless jumping, health, and a saved best score |
+| May 14, 2023 | Repeat the cliff and add falling stones |
+| June 18, 2023 | Add warning UI and a playable game mode |
+| July 23, 2023 | Improve the UI, documentation, and gameplay checks |
+| July 30, 2023 | Bring back Payton and fix the hanging grip |
+| July 31, 2023 | Keep the jumping character outside the wall and update the README |
 
 The retained Unreal starter content, MetaHuman assets, and other supplied art remain subject to their respective licenses. No new license is asserted over third-party assets.

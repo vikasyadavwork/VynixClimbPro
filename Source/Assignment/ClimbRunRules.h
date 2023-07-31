@@ -38,7 +38,8 @@ namespace ClimbRunRules
         const float T = FMath::Clamp(Alpha, 0.f, 1.f);
         const float Ease = T * T * (3.f - 2.f * T);
         const float Arc = FMath::Sin(T * PI);
-        return FMath::Lerp(Start, Target, Ease) + FVector(-40.f * Arc, 0.f, 75.f * Arc);
+        // Travel across/up the cliff while retaining the grip's wall clearance.
+        return FMath::Lerp(Start, Target, Ease) + FVector(0.f, 0.f, 75.f * Arc);
     }
 
     inline int32 Score(double HeightMetres, double Seconds, int32 JumpBonus)

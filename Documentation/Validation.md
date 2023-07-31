@@ -6,11 +6,11 @@ Both **AssignmentEditor / Win64 / Development** and **Assignment / Win64 / Devel
 
 ## Automated gameplay checks
 
-**10 passed, 0 failed.** One retained MetaHuman face Blueprint warning appears on its first load (`Modify Curve` is flagged as potentially thread-unsafe). Run through Unreal's automation controller with `-NullRHI -DisablePlugins=Fab` and `Automation RunTests VynixClimb`.
+**11 passed, 0 failed**, through `Development/Validate.ps1` on September 6, 2026. The script checks the fresh JSON report as well as process exit status, because Unreal can exit with code zero after a failed test. One retained MetaHuman face Blueprint warning appears on its first load (`Modify Curve` is flagged as potentially thread-unsafe).
 
 | Test | What it checks |
 | --- | --- |
-| `Rules.JumpTrajectory` | Exact grip endpoints, upward arc, mirrored lane jumps, clamped progress |
+| `Rules.JumpTrajectory` | Exact grip endpoints, fixed wall distance, upward arc, mirrored lane jumps, clamped progress |
 | `Rules.Score` | Height/time/bonus contributions, monotonic progress, overflow saturation |
 | `Rules.Health` | Normal damage, health bounds, rejected negative/NaN/infinite damage |
 | `Rules.LedgeBounds` | Nonuniform mesh scale, off-centre pivots, width limits, top height, front clearance, invalid bounds |
@@ -20,6 +20,7 @@ Both **AssignmentEditor / Win64 / Development** and **Assignment / Win64 / Devel
 | `Runtime.RockfallTelegraph` | Five warning/release/clear cycles, escape time, one active hazard, sphere physics setup, random delay bounds |
 | `Runtime.PaytonAndLedgeClearance` | Original Payton body and clothing, matching animation skeleton, 85 jumps each on three ledge sizes, clearance throughout jumps and recycling, updated rock depth |
 | `Runtime.HandContactDuringIdle` | Actual fingertip and wrist positions over 60 evaluated poses on each of three grips, hands released in flight and replanted after landing |
+| `Runtime.AnimatedJumpClearance` | 72 evaluated poses per left/right/up jump on three ledge sizes; fixed capsule depth, pelvis following the actor's complete path, head/limb clearance, fingertip contact after landing |
 
 Actor tests use an isolated preview world and do not write player saves. The director test advances its schedule deterministically; it verifies physics configuration rather than pretending to benchmark Chaos simulation.
 
@@ -35,10 +36,13 @@ Launched the actual `EndlessClimb` map through `UnrealEditor-Cmd -game -RenderOf
 - The capture produces no game errors and does not modify persistent best-run records.
 - The capture includes an oblique hand close-up after warming the editor's texture, hair, and shader compilation queues.
 - Payton uses her supplied hair cards in the arcade mode; hair remains visible in both the close-up and the gameplay view.
+- The additional `-VynixJumpCapture` check produced nine side views at a fixed simulation step. Inspected early, middle, and late poses for right, left, and upward jumps: the body follows the actor's path, and the torso and reaching limbs stay outside the ledge face. The capture exited successfully with no game errors.
 
 ![Game-over UI](Images/game-over.png)
 
 ![Hand placement at the ledge lip](Images/hand-contact.png)
+
+![Body clearance during a lateral jump](Images/jump-clearance.png)
 
 ## Limits of verification
 

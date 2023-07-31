@@ -126,7 +126,7 @@ bool FClimbJumpRulesTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Overshot progress stays exactly at the target"), JumpPosition(Start, End, 3.f) == End);
 	const FVector Mid = JumpPosition(Start, End, 0.5f);
 	TestTrue(TEXT("A crossing jump passes through the lane midpoint"), FMath::IsNearlyZero(Mid.Y));
-	TestTrue(TEXT("A jump arcs out from the wall"), Mid.X < Start.X - 30.f);
+	TestTrue(TEXT("A jump keeps the same distance from the wall"), FMath::IsNearlyEqual(Mid.X, Start.X));
 	TestTrue(TEXT("A jump lifts above a straight interpolation"), Mid.Z > (Start.Z + End.Z) * 0.5f + 30.f);
 
 	for (int32 Sample = 0; Sample <= 20; ++Sample)
@@ -138,6 +138,12 @@ bool FClimbJumpRulesTest::RunTest(const FString& Parameters)
 			LeftToRight.Equals(FVector(RightToLeft.X, -RightToLeft.Y, RightToLeft.Z), KINDA_SMALL_NUMBER));
 		const FVector Up = JumpPosition(Start, Start + FVector(0.f, 0.f, StepHeight), Alpha);
 		TestTrue(TEXT("An upward jump stays on its selected lane"), FMath::IsNearlyEqual(Up.Y, Start.Y));
+		TestTrue(TEXT("Crossing and upward jumps preserve hanging depth at every sample"),
+			FMath::IsNearlyEqual(LeftToRight.X, Start.X) && FMath::IsNearlyEqual(Up.X, Start.X));
+		const FVector DeeperGrip = End + FVector(-120.f, 0.f, 0.f);
+		const float Ease = Alpha * Alpha * (3.f - 2.f * Alpha);
+		TestTrue(TEXT("Different ledge depths follow the two grip depths without extra inward movement"),
+			FMath::IsNearlyEqual(JumpPosition(Start, DeeperGrip, Alpha).X, FMath::Lerp(Start.X, DeeperGrip.X, Ease), 0.001));
 		TestFalse(TEXT("Trajectory remains finite"), LeftToRight.ContainsNaN());
 	}
 	return true;
@@ -485,6 +491,110 @@ bool FClimbPaytonTest::RunTest(const FString& Parameters)
 			TestTrue(TEXT("Rock depth matches the actual player grip"), FMath::IsNearlyEqual(Run.Rocks()[0]->GetActorLocation().X, Run.Climber->GetActorLocation().X, 0.01));
 	}
 	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FClimbAnimatedJumpClearanceTest, "VynixClimb.Runtime.AnimatedJumpClearance", ClimbTests::Flags)
+
+bool FClimbAnimatedJumpClearanceTest::RunTest(const FString& Parameters)
+{
+    bool bAllClear = true;
+	UClass* PaytonClass = LoadClass<AEndlessClimber>(nullptr, TEXT("/Game/Endless/Payton/BP_EndlessPayton.BP_EndlessPayton_C"));
+	if (!TestNotNull(TEXT("Payton loads for the animated clearance test"), PaytonClass)) return false;
+	const TArray<FName> BodyBones = {
+		TEXT("pelvis"), TEXT("spine_01"), TEXT("spine_03"), TEXT("neck_01"), TEXT("head"),
+		TEXT("upperarm_l"), TEXT("lowerarm_l"), TEXT("hand_l"),
+		TEXT("upperarm_r"), TEXT("lowerarm_r"), TEXT("hand_r"),
+		TEXT("thigh_l"), TEXT("calf_l"), TEXT("foot_l"), TEXT("ball_l"),
+		TEXT("thigh_r"), TEXT("calf_r"), TEXT("foot_r"), TEXT("ball_r")
+	};
+	for (const FVector Size : { FVector(105, 175, 26), FVector(210, 250, 45), FVector(60, 130, 18) })
+	{
+		ClimbTests::FPreviewRun Run;
+		if (!TestTrue(TEXT("The animated clearance arena initializes"), Run.Create(true, PaytonClass, Size))) return false;
+		USkeletalMeshComponent* Mesh = Run.Climber->GetMesh();
+		for (FName Bone : BodyBones)
+		{
+			if (!TestTrue(*FString::Printf(TEXT("Payton contains clearance bone %s"), *Bone.ToString()), Mesh->DoesSocketExist(Bone))) return false;
+		}
+		Mesh->TickAnimation(0.f, false);
+		Mesh->RefreshBoneTransforms();
+		const double HangingActorX = Run.Climber->GetActorLocation().X;
+		const double HangingPelvisX = Mesh->GetSocketLocation(TEXT("pelvis")).X;
+		const FVector HangingPelvisOffset = Mesh->GetSocketLocation(TEXT("pelvis")) - Run.Climber->GetActorLocation();
+		// Right, left, then up exercises all three retargeted jump clips. Tick the actual
+		// animation as well as the actor: a clear capsule alone does not prove the body is clear.
+		for (int32 Lane : { 1, 0, 0 })
+		{
+			Run.Climber->Tick(0.12f);
+			FBox Bounds;
+			if (!TestTrue(TEXT("The departure ledge exists"), Run.Arena->GetLedgeBounds(
+				Run.Climber->GetCompletedJumps(), Run.Climber->GetCurrentLane(), Bounds))) return false;
+			Run.Climber->LeapToLane(Lane);
+			if (!TestTrue(TEXT("The requested animated jump starts"), Run.Climber->IsLeaping())) return false;
+			UAnimSingleNodeInstance* Animation = Mesh->GetSingleNodeInstance();
+			if (!TestNotNull(TEXT("The jump has an animation instance"), Animation)) return false;
+			const FString Clip = Animation->GetCurrentAsset()->GetName();
+			double WorstPelvisDrift = 0.0;
+			FVector WorstPelvisOffsetError = FVector::ZeroVector;
+			int32 WorstPelvisFrame = 0;
+			double DeepestBoneX = -std::numeric_limits<double>::max();
+			FName DeepestBone;
+			int32 DeepestFrame = 0;
+			constexpr int32 Frames = 72;
+			const float FrameSeconds = ClimbRunRules::JumpDuration / Frames;
+			for (int32 Frame = 0; Frame < Frames; ++Frame)
+			{
+				if (Frame > 0) Run.Climber->Tick(FrameSeconds);
+				Mesh->TickAnimation(Frame == 0 ? 0.f : FrameSeconds, false);
+				Mesh->RefreshBoneTransforms();
+				if (!TestTrue(TEXT("The actor maintains hanging depth throughout the jump"),
+					FMath::IsNearlyEqual(Run.Climber->GetActorLocation().X, HangingActorX, 0.01))) return false;
+				WorstPelvisDrift = FMath::Max(WorstPelvisDrift,
+					FMath::Abs(Mesh->GetSocketLocation(TEXT("pelvis")).X - HangingPelvisX));
+				const FVector OffsetError = Mesh->GetSocketLocation(TEXT("pelvis"))
+					- Run.Climber->GetActorLocation() - HangingPelvisOffset;
+				if (OffsetError.SizeSquared() > WorstPelvisOffsetError.SizeSquared())
+				{
+					WorstPelvisOffsetError = OffsetError;
+					WorstPelvisFrame = Frame;
+				}
+				for (FName Bone : BodyBones)
+				{
+					const double BoneX = Mesh->GetSocketLocation(Bone).X;
+					if (BoneX > DeepestBoneX)
+					{
+						DeepestBoneX = BoneX;
+						DeepestBone = Bone;
+						DeepestFrame = Frame;
+					}
+				}
+			}
+			const FString Context = FString::Printf(TEXT("%s, ledge %s"), *Clip, *Size.ToString());
+			const bool bStableDepth = TestTrue(*FString::Printf(TEXT("The animated pelvis keeps hanging depth (%s; maximum drift %.3f cm)"),
+				*Context, WorstPelvisDrift), WorstPelvisDrift < 0.1);
+			const bool bFollowsActor = TestTrue(*FString::Printf(TEXT("The animated pelvis follows the actor without adding the clip's travel (%s; frame %d offset error %s)"),
+				*Context, WorstPelvisFrame, *WorstPelvisOffsetError.ToString()), WorstPelvisOffsetError.Size() < 0.1);
+			const bool bClearPose = TestTrue(*FString::Printf(TEXT("Animated body and major limb joints stay outside the ledge front (%s; %s at frame %d: X %.3f, front %.3f)"),
+				*Context, *DeepestBone.ToString(), DeepestFrame, DeepestBoneX, Bounds.Min.X), DeepestBoneX < Bounds.Min.X);
+            if (!bStableDepth || !bFollowsActor || !bClearPose) bAllClear = false;
+			Run.Climber->Tick(FrameSeconds + 0.001f);
+			Mesh->TickAnimation(0.f, false);
+			Mesh->RefreshBoneTransforms();
+			TestFalse(TEXT("The complete clip reaches the next grip"), Run.Climber->IsLeaping());
+			TestEqual(TEXT("The jump reaches the requested lane"), Run.Climber->GetCurrentLane(), Lane);
+			if (!Run.Arena->GetLedgeBounds(Run.Climber->GetCompletedJumps(), Lane, Bounds)) return false;
+			for (const TCHAR* Side : { TEXT("l"), TEXT("r") })
+			{
+				const FVector Tip = Mesh->GetSocketLocation(FName(*FString::Printf(TEXT("middle_03_%s"), Side)));
+				const FVector Parent = Mesh->GetSocketLocation(FName(*FString::Printf(TEXT("middle_02_%s"), Side)));
+				const FVector Contact = Tip + (Tip - Parent).GetSafeNormal() * 2.f * Mesh->GetComponentScale().GetAbsMax();
+				if (!TestTrue(TEXT("Landing restores fingertip contact at the front lip"),
+					FMath::Abs(Contact.X - (Bounds.Min.X - 2.5)) < 2.0 && FMath::Abs(Contact.Z - (Bounds.Max.Z + 2.5)) < 2.0)) return false;
+			}
+			Run.Arena->Tick(0.f);
+		}
+	}
+	return bAllClear;
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FClimbHandContactTest, "VynixClimb.Runtime.HandContactDuringIdle", ClimbTests::Flags)

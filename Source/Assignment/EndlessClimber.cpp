@@ -105,6 +105,8 @@ void AEndlessClimber::BeginPlay()
     PlayClimbAnimation(HangAnimation, true);
     GetMesh()->TickAnimation(0.f, false);
     GetMesh()->RefreshBoneTransforms();
+    if (GetMesh()->DoesSocketExist(TEXT("pelvis")))
+        HangPelvisOffset = GetMesh()->GetSocketLocation(TEXT("pelvis")) - GetActorLocation();
     if (GetMesh()->DoesSocketExist(TEXT("hand_l")) && GetMesh()->DoesSocketExist(TEXT("hand_r")))
     {
         const FVector Hands = (GetMesh()->GetSocketLocation(TEXT("hand_l"))
@@ -167,6 +169,17 @@ bool AEndlessClimber::GetHandLedgeBounds(FBox& OutBounds) const
 {
     return !bLeaping && ClimbArena.IsValid()
         && ClimbArena->GetLedgeBounds(CompletedJumps, CurrentLane, OutBounds);
+}
+
+bool AEndlessClimber::GetJumpLedgeBounds(FBox& OutBounds) const
+{
+    FBox Departure;
+    if (!bLeaping || !ClimbArena.IsValid()
+        || !ClimbArena->GetLedgeBounds(CompletedJumps, CurrentLane, Departure)
+        || !ClimbArena->GetLedgeBounds(CompletedJumps + 1, TargetLane, OutBounds)) return false;
+    // Clear both grips if their depth differs.
+    OutBounds.Min.X = FMath::Min(Departure.Min.X, OutBounds.Min.X);
+    return true;
 }
 
 void AEndlessClimber::AttachToArena(AEndlessClimbWorld* Arena)
@@ -245,9 +258,6 @@ void AEndlessClimber::Tick(float DeltaSeconds)
         JumpElapsed += DeltaSeconds;
         const float Alpha = JumpElapsed / ClimbRunRules::JumpDuration;
         SetActorLocation(ClimbRunRules::JumpPosition(JumpStart, JumpTarget, Alpha), false);
-        FRotator Lean = RestMeshRotation;
-        Lean.Roll += FMath::Sin(FMath::Min(1.f, Alpha) * PI) * (TargetLane == 0 ? -8.f : 8.f);
-        GetMesh()->SetRelativeRotation(Lean);
         if (Alpha >= 1.f) FinishLeap();
     }
     else
