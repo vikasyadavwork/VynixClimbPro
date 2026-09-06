@@ -95,20 +95,3 @@ Add `-VynixJumpCapture` to that command for nine side-view screenshots: early, m
 The supplied Payton assets are ready to use. To regenerate them, first run `Development/PreparePaytonAnimations.py` with a full editor's `-ExecutePythonScript` option (UE 5.5's retargeter requires the Content Browser), then run `Development/CreateEndlessPayton.py` after compiling the editor target. The latter keeps the cosmetic construction and replaces the copied prototype EventGraph with the native arcade gameplay.
 
 The arcade character uses Payton's supplied hair cards for consistent rendering across camera distances. Her assets remain loaded across level restarts, avoiding repeated legacy mesh and groom rebuilds. After rebuilding C++ while an older editor session is open, save your work and restart the editor to load the new character code.
-
-## History
-
-The starting game was supplied as a 2023 project without Git history. The March–July 2023 commit dates in this repository are a **reconstructed learning sequence**, arranged at the owner's request; they are not a record of when these changes were actually made. The current project targets Unreal 5.5.
-
-| Date | Learning step |
-| --- | --- |
-| March 4, 2023 | Start with the original climbing prototype |
-| March 18, 2023 | Fix input and stamina problems |
-| April 9, 2023 | Add endless jumping, health, and a saved best score |
-| May 14, 2023 | Repeat the cliff and add falling stones |
-| June 18, 2023 | Add warning UI and a playable game mode |
-| July 23, 2023 | Improve the UI, documentation, and gameplay checks |
-| July 30, 2023 | Bring back Payton and fix the hanging grip |
-| July 31, 2023 | Keep the jumping character outside the wall and update the README |
-
-The retained Unreal starter content, MetaHuman assets, and other supplied art remain subject to their respective licenses. No new license is asserted over third-party assets.
